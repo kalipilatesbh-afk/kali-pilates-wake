@@ -1,0 +1,50 @@
+# Mantém o app do KALI acordado no plano gratuito do Render.
+#
+# Por que existe: no plano free o Render "dorme" depois de 15 minutos sem
+# visitas, e o primeiro aluno espera ~1 minuto. Este robô bate no endereço
+# /api/wake (23 bytes de resposta) a cada 10 minutos.
+#
+# Janela: 08:00-23:59 e 00:00-02:59 UTC = 05:00-23:00 no horário de Brasília.
+# Fora desse horário o site pode dormir: ninguém usa o app de madrugada, e
+# assim o consumo fica em ~560 das 750 horas grátis do Render por mês.
+name: Acordar o KALI
+
+on:
+  schedule:
+    - cron: "*/10 8-23,0-2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Bater no app
+        run: |
+          echo "Horário UTC: $(date -u)"
+          codigo=$(curl -s -o /tmp/resposta.txt -w "%{http_code}" --max-time 90 \
+            https://kali-pilates.onrender.com/api/wake || echo "000")
+          echo "HTTP $codigo"
+          cat /tmp/resposta.txt || true
+          if [ "$codigo" != "200" ]; then
+            echo "::warning::O app respondeu $codigo"
+          fi
+
+      # Mantém o repositório "ativo": o GitHub desliga agendamentos de
+      # repositórios públicos após 60 dias sem atividade.
+      - name: Registro diário (mantém o agendamento vivo)
+        if: github.event_name == 'schedule'
+        run: |
+          hora=$(date -u +%H)
+          if [ "$hora" = "12" ]; then
+            mkdir -p registro
+            date -u +"%Y-%m-%dT%H:%M:%SZ" > registro/ultimo-ping.txt
+            git config user.name "robo-kali"
+            git config user.email "robo@kalipilates.com.br"
+            git add registro/ultimo-ping.txt
+            git diff --staged --quiet || git commit -m "registro: $(date -u +%Y-%m-%d)"
+            git push || true
+          fi
